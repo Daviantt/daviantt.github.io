@@ -1472,7 +1472,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (btnZaloLogin) {
       btnZaloLogin.addEventListener('click', () => {
         const appId = '145188836807457994'; 
-        const redirectUri = 'https://daviantt.github.io/Salinity-prediction-DBSCL/'; 
+        const redirectUri = "https://daviantt.github.io/"; 
         const state = Math.random().toString(36).substring(7);
         localStorage.setItem('zalo_auth_state', state); 
         
