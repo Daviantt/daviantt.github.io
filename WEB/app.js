@@ -220,6 +220,33 @@ let HEX_ENABLED = false;
 let CURRENT_HEX = null; // Track active hex
 let CURRENT_PROBLEM = null; // 'drought' or 'mangrove'
 let SELECTED_YEAR = '2022';
+let HEX_HOVER_ENABLED = true;
+
+function setHexHoverEnabled(enabled) {
+  if (HEX_HOVER_ENABLED === enabled) return;
+  HEX_HOVER_ENABLED = enabled;
+  tooltip.style.display = "none";
+  if (HEX_ENABLED) {
+    renderLayers();
+  }
+}
+
+function clearHexSelection() {
+  selectedHexForPrediction = null;
+  CURRENT_HEX = null;
+  HEX_HOVER_ENABLED = true;
+  tooltip.style.display = "none";
+  dashboardModal.style.display = 'none';
+  renderLayers();
+}
+
+function isWithinMekongBounds(lat, lon) {
+  const minLat = MEKONG_BOUNDS[0][1];
+  const maxLat = MEKONG_BOUNDS[1][1];
+  const minLon = MEKONG_BOUNDS[0][0];
+  const maxLon = MEKONG_BOUNDS[1][0];
+  return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon;
+}
 
 function getMangroveColor(pct) {
   if (pct === null || pct === undefined || Number.isNaN(pct)) return [156,163,175,200];
@@ -231,6 +258,8 @@ function getMangroveColor(pct) {
 }
 
 function createH3Layer() {
+  const selectedHexId = selectedHexForPrediction?.hex || CURRENT_HEX;
+
   return new H3HexagonLayer({
     id: "h3-layer",
     data: DATA,
@@ -244,8 +273,8 @@ function createH3Layer() {
     // Color based on salinity quartiles
     getFillColor: d => {
       // Highlight selected hex for prediction with different color
-      if (selectedHexForPrediction && d.hex === selectedHexForPrediction.hex) {
-        return [255, 215, 0, 255]; // Gold color for selected hex
+      if (selectedHexId && d.hex === selectedHexId) {
+        return [56, 189, 248, 245]; // Cyan-blue highlight (close to hover feel)
       }
       // Use salinity quartile color
       const sal = d.predicted_salinity !== undefined ? d.predicted_salinity : d.salinity;
@@ -254,8 +283,8 @@ function createH3Layer() {
 
     getLineColor: d => {
       // Thicker white border for selected hex
-      if (selectedHexForPrediction && d.hex === selectedHexForPrediction.hex) {
-        return [255, 255, 255, 255]; // Solid white
+      if (selectedHexId && d.hex === selectedHexId) {
+        return [14, 116, 144, 255]; // Strong border for selected hex
       }
       return [255, 255, 255, 120];
     },
@@ -263,17 +292,17 @@ function createH3Layer() {
     
     // Make selected hex line thicker
     getLineWidth: d => {
-      if (selectedHexForPrediction && d.hex === selectedHexForPrediction.hex) {
-        return 4;
+      if (selectedHexId && d.hex === selectedHexId) {
+        return 5;
       }
       return 1;
     },
 
     getElevation: d => {
       // Elevate selected hex higher
-      if (selectedHexForPrediction && d.hex === selectedHexForPrediction.hex) {
+      if (selectedHexId && d.hex === selectedHexId) {
         const sal = d.predicted_salinity || d.salinity || 0;
-        return Number(sal) * 2500 + 500; // Extra elevation
+        return Number(sal) * 2500 + 900; // Extra elevation for selected hex visibility
       }
       
       if (CURRENT_PROBLEM === 'mangrove') {
@@ -286,13 +315,21 @@ function createH3Layer() {
     },
     elevationScale: 1,
 
-    autoHighlight: true,
+    autoHighlight: HEX_HOVER_ENABLED,
+    highlightColor: [168, 85, 247, 220],
+    updateTriggers: {
+      autoHighlight: [HEX_HOVER_ENABLED],
+      getFillColor: [selectedHexId],
+      getLineColor: [selectedHexId],
+      getLineWidth: [selectedHexId],
+      getElevation: [selectedHexId]
+    },
 
     /* ======================
        HOVER: tooltip gọn nhẹ
        ====================== */
     onHover: info => {
-      if (!HEX_ENABLED || !info.object) {
+      if (!HEX_ENABLED || !HEX_HOVER_ENABLED || !info.object) {
         tooltip.style.display = "none";
         return;
       }
@@ -340,6 +377,10 @@ function createH3Layer() {
       }
 
       const o = info.object;
+
+      CURRENT_HEX = o.hex;
+      selectedHexForPrediction = o;
+      renderLayers();
       
       // Open Dashboard with all data
       openDashboard(o);
@@ -541,6 +582,16 @@ if(btnToggle){
   });
 }
 
+const dashboardContainer = dashboardModal ? dashboardModal.querySelector('.dashboard-container') : null;
+if (dashboardContainer) {
+  dashboardContainer.addEventListener('mouseenter', () => {
+    setHexHoverEnabled(false);
+  });
+  dashboardContainer.addEventListener('mouseleave', () => {
+    setHexHoverEnabled(true);
+  });
+}
+
 document.getElementById('chkTemp').addEventListener('change', (e) => {
   if (timelineChart) timelineChart.setDatasetVisibility(0, e.target.checked);
   if (timelineChart) timelineChart.update();
@@ -552,7 +603,7 @@ document.getElementById('chkSolar').addEventListener('change', (e) => {
 });
 
 document.getElementById('btnCloseDashboard').addEventListener('click', () => {
-  dashboardModal.style.display = 'none';
+  clearHexSelection();
 });
 
 // Close when clicking outside - REMOVED for floating panel
@@ -725,6 +776,12 @@ yearOptions.forEach(btn => {
 // ===========================
 const btnXGBoost = document.getElementById('btnXGBoost');
 const xgboostPanel = document.getElementById('xgboostPanel');
+const btnCoordSearch = document.getElementById('btnCoordSearch');
+const coordSearchPanel = document.getElementById('coordSearchPanel');
+const coordLatInput = document.getElementById('coordLatInput');
+const coordLonInput = document.getElementById('coordLonInput');
+const btnCoordSearchSubmit = document.getElementById('btnCoordSearchSubmit');
+const btnCoordSearchClear = document.getElementById('btnCoordSearchClear');
 
 // Show AI button for all years (not just 2025)
 if (btnXGBoost) {
@@ -746,6 +803,39 @@ if (btnXGBoost && xgboostPanel) {
       legendBox.style.display = 'none';
       btnXGBoost.innerText = 'Đóng AI Panel';
     }
+  });
+}
+
+if (btnCoordSearch && coordSearchPanel) {
+  btnCoordSearch.addEventListener('click', () => {
+    const isVisible = coordSearchPanel.style.display === 'block';
+    coordSearchPanel.style.display = isVisible ? 'none' : 'block';
+  });
+}
+
+if (btnCoordSearchSubmit) {
+  btnCoordSearchSubmit.addEventListener('click', () => {
+    const lat = parseFloat(coordLatInput.value);
+    const lon = parseFloat(coordLonInput.value);
+
+    if (Number.isNaN(lat) || Number.isNaN(lon)) {
+      alert('Vui lòng nhập đầy đủ Vĩ độ và Kinh độ.');
+      return;
+    }
+
+    if (!isWithinMekongBounds(lat, lon)) {
+      alert('Toạ độ ngoài vùng ĐBSCL. Vui lòng nhập trong giới hạn: Lat 8.0-11.6, Lon 104.1-107.2.');
+      return;
+    }
+
+    const label = `Toạ độ nhập tay (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    selectLocation(lat, lon, label);
+  });
+}
+
+if (btnCoordSearchClear) {
+  btnCoordSearchClear.addEventListener('click', () => {
+    clearHexSelection();
   });
 }
 
@@ -993,8 +1083,8 @@ if (btnPredictAll) {
       // Enable hex layer and show map
       if (!HEX_ENABLED) {
         HEX_ENABLED = true;
-        hexToggle.classList.add('active');
-        hexToggle.innerText = "Tắt Hex";
+        document.getElementById("hexToggle").checked = true;
+        syncHexToggleUI();
         renderLayers();
       }
       
@@ -1147,8 +1237,8 @@ async function selectLocation(lat, lon, name) {
   // Enable hex layer if not enabled
   if (!HEX_ENABLED) {
     HEX_ENABLED = true;
-    hexToggle.classList.add('active');
-    hexToggle.innerText = "Tắt Hex";
+    document.getElementById("hexToggle").checked = true;
+    syncHexToggleUI();
     renderLayers();
   }
 
@@ -1172,6 +1262,15 @@ async function selectLocation(lat, lon, name) {
     // Set current hex for highlighting
     CURRENT_HEX = nearestHex.hex;
     selectedHexForPrediction = nearestHex;
+
+    // Center map exactly on selected hex so it is easy to identify
+    const [hexLat, hexLon] = h3.cellToLatLng(nearestHex.hex);
+    map.flyTo({
+      center: [hexLon, hexLat],
+      zoom: 12.5,
+      pitch: 45,
+      duration: 700
+    });
     
     // Re-render to show highlight
     renderLayers();
@@ -1266,8 +1365,8 @@ async function selectLocationForPrediction(lat, lon, name) {
   // Enable hex layer if not enabled
   if (!HEX_ENABLED) {
     HEX_ENABLED = true;
-    hexToggle.classList.add('active');
-    hexToggle.innerText = "Tắt Hex";
+    document.getElementById("hexToggle").checked = true;
+    syncHexToggleUI();
     renderLayers();
   }
 
@@ -1289,6 +1388,15 @@ async function selectLocationForPrediction(lat, lon, name) {
     console.log('Found nearest hex for prediction:', nearestHex.hex);
     selectedHexForPrediction = nearestHex;
     CURRENT_HEX = nearestHex.hex;
+
+    // Center map exactly on selected hex so highlight is obvious
+    const [hexLat, hexLon] = h3.cellToLatLng(nearestHex.hex);
+    map.flyTo({
+      center: [hexLon, hexLat],
+      zoom: 12.5,
+      pitch: 45,
+      duration: 700
+    });
     
     // Re-render to highlight the selected hex
     renderLayers();
@@ -1341,7 +1449,7 @@ if (aiSearchInput) {
 // Clear selected location
 if (btnClearLocation) {
   btnClearLocation.addEventListener('click', () => {
-    selectedHexForPrediction = null;
+    clearHexSelection();
     selectedLocation.style.display = 'none';
     locationName.textContent = '';
     
@@ -1482,3 +1590,110 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 });
+
+// ===========================
+// GIẢ LẬP NHẬN TOẠ ĐỘ TỪ ZALO
+// ===========================
+
+window.addEventListener('DOMContentLoaded', () => {
+  const btnToggleZalo = document.getElementById('btnToggleZalo');
+  const zaloPanel = document.getElementById('zaloPanel');
+  const btnClearZaloSelection = document.getElementById('btnClearZaloSelection');
+
+  // Lắng nghe sự kiện click để bật/tắt panel
+  if (btnToggleZalo && zaloPanel) {
+    btnToggleZalo.addEventListener('click', () => {
+      if (zaloPanel.style.display === 'none' || zaloPanel.style.display === '') {
+        zaloPanel.style.display = 'block';
+      } else {
+        zaloPanel.style.display = 'none';
+      }
+    });
+  }
+
+  if (btnClearZaloSelection) {
+    btnClearZaloSelection.addEventListener('click', () => {
+      clearHexSelection();
+    });
+  }
+
+  // Khởi tạo một toạ độ Demo khi tải trang
+  const demoLat = 10.0333;
+  const demoLon = 105.7833;
+  addCoordToList(demoLat, demoLon, "Nguyễn Văn A (Cần Thơ)", "Vừa xong");
+});
+
+// Hàm thêm một item toạ độ vào danh sách UI
+function addCoordToList(lat, lon, name = "Vị trí chia sẻ từ Zalo", time = new Date().toLocaleTimeString('vi-VN')) {
+  const list = document.getElementById('coordList');
+  if (!list) return;
+  
+  const li = document.createElement('li');
+  li.style.padding = '12px 10px';
+  li.style.borderBottom = '1px solid #f0f0f0';
+  li.style.cursor = 'pointer';
+  li.style.transition = 'background 0.2s';
+  li.style.borderRadius = '6px';
+  
+  li.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+      <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">📍 ${name}</div>
+      <div style="font-size: 0.7rem; color: #94a3b8;">${time}</div>
+    </div>
+    <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">Toạ độ: ${lat.toFixed(4)}, ${lon.toFixed(4)}</div>
+  `;
+  
+  li.onmouseover = () => li.style.background = '#f0f9ff';
+  li.onmouseout = () => li.style.background = 'transparent';
+  
+  li.onclick = () => {
+    if(typeof selectLocation === 'function') {
+      selectLocation(lat, lon, name);
+    }
+  };
+  
+  list.insertBefore(li, list.firstChild);
+}
+
+// Hàm xử lý khi bấm nút "Gửi" giả lập
+window.simulateZaloMessage = function() {
+  const input = document.getElementById('mockZaloInput').value.trim();
+  
+  if (!input) {
+    alert("Vui lòng nhập toạ độ!");
+    return;
+  }
+
+  const parts = input.split(',');
+  if (parts.length !== 2) {
+    alert("Định dạng không hợp lệ! Vui lòng nhập theo mẫu: Vĩ độ, Kinh độ\nVí dụ: 10.03, 105.78");
+    return;
+  }
+
+  const lat = parseFloat(parts[0].trim());
+  const lon = parseFloat(parts[1].trim());
+
+  if (isNaN(lat) || isNaN(lon)) {
+    alert("Toạ độ phải là dạng số!");
+    return;
+  }
+
+  const minLat = MEKONG_BOUNDS[0][1]; 
+  const maxLat = MEKONG_BOUNDS[1][1]; 
+  const minLon = MEKONG_BOUNDS[0][0]; 
+  const maxLon = MEKONG_BOUNDS[1][0]; 
+
+  if (lat < minLat || lat > maxLat || lon < minLon || lon > maxLon) {
+    alert(`❌ Toạ độ (${lat}, ${lon}) nằm ngoài vùng ĐBSCL!\n\nVui lòng nhập trong khoảng:\n- Vĩ độ (Lat): ${minLat} đến ${maxLat}\n- Kinh độ (Lon): ${minLon} đến ${maxLon}`);
+    return;
+  }
+
+  const senderName = "Người dùng ẩn danh " + Math.floor(Math.random() * 100);
+  addCoordToList(lat, lon, senderName);
+  
+  if(typeof selectLocation === 'function') {
+    selectLocation(lat, lon, senderName);
+  }
+  
+  document.getElementById('mockZaloInput').value = "";
+};
